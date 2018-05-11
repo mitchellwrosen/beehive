@@ -1,0 +1,11 @@
+cabal-version: 2.2
+
+name: beehive
+version: 0
+
+executable beehive
+  main-is: Main.hs
+  ghc-options: -Wall
+  build-depends:
+    mitchell-stdlib
+  default-language: Haskell2010
