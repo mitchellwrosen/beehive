@@ -1,1 +1,1 @@
--c "cabal new-repl -O0" --restart behive.cabal --restart cabal.project
+-c "cabal new-repl -O0" --restart beehive.cabal --restart cabal.project

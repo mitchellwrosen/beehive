@@ -1,2 +1,9 @@
 packages: ., deps/mitchell-stdlib
+
 with-compiler: ghc-8.4.2
+
+package mitchell-stdlib
+  flags:
+    +reactive-banana
+    +text
+    +transformers
