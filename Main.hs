@@ -1,10 +1,22 @@
+import Distribution (Distribution)
+import Render (Render)
+
+import qualified Distribution
+import qualified Render
+
 import Coerce (unsafeCoerce)
 import FRP
 import Reader
-import State
 import Text (pack)
 
+import qualified Random
+import qualified Text
+
 import qualified UI.NCurses as Curses
+
+--------------------------------------------------------------------------------
+-- main
+--------------------------------------------------------------------------------
 
 main :: IO ()
 main = do
@@ -20,7 +32,7 @@ main = do
 
     _ <- liftIO . forkIO . forever $ do
       fireTick ()
-      threadDelay 1000000
+      threadDelay 100000
 
     network :: EventNetwork <- do
       liftIO . compile $ do
@@ -29,14 +41,17 @@ main = do
             fromAddHandler tickAddHandler
           accumE 0 ((+1) <$ eTick)
 
+        gen :: Random.GenIO <-
+          liftIO Random.createSystemRandom
+
         -- The time-varying scene to render.
         bScene :: Behavior (Render ()) <-
-          moment eTime
+          moment gen eTime
 
         let doRender :: Render () -> IO ()
             doRender action =
               unCurses $ do
-                render action window
+                Render.render action window
                 Curses.render
 
         -- Render the very first scene.
@@ -53,44 +68,113 @@ main = do
 
     liftIO (forever (threadDelay maxBound))
 
+--------------------------------------------------------------------------------
+-- Data types
+--------------------------------------------------------------------------------
+
+data Stage
+  = StageEgg
+  | StageLarva
+  deriving Eq
+
+--------------------------------------------------------------------------------
+-- Core game logic
+--------------------------------------------------------------------------------
+
 moment
-  :: Event Int -- Time
+  :: Random.GenIO
+  -> Event Int -- Time
   -> MomentIO (Behavior (Render ()))
-moment eTime = mdo
-  eLog :: Event [Text] <-
-    accumE [] ((\n ss -> "Time = " <> pack (show n) : ss) <$> eTime)
+moment gen eTime = mdo
+  bTime :: Behavior Int <-
+    stepper 0 eTime
+
+  -- The queen becomes a larva. Fires only once.
+  eBecomeLarva :: Event () <- do
+    n <- liftIO (Random.uniformR (100, 200) gen)
+    pure (() <$ filterE (== n) eTime)
+
+  -- The stage of the queen.
+  bStage :: Behavior Stage <-
+    switchB (pure StageEgg)
+      (leftmost
+        [ pure StageLarva <$ eBecomeLarva
+        ])
+
+  -- The distribution of ambient text that might be logged at every tick.
+  let bAmbience :: Behavior (Distribution Text)
+      bAmbience =
+        (\stage ->
+          case stage of
+            StageEgg ->
+              Distribution.new
+                [ (200, "Wiggle.")
+                ]
+            StageLarva ->
+              Distribution.new
+                [ (100, "Wiggle wiggle.")
+                , (100, "Mmmm. Jelly.")
+                ])
+        <$> bStage
+
+  -- The event log. Grows and grows and grows with every message meant to be
+  -- output to the console.
+  eLog :: Event [Text] <- do
+    eAmbientLog :: Event (Maybe Text) <-
+      mapEventIO
+        (\d -> Distribution.sample gen Nothing (Just <$> d))
+        (bAmbience <@ eTime)
+
+    accumE []
+      (unions
+        [ maybe id (:) <$> eAmbientLog
+        , ("Phhfffffllp." :) <$ eBecomeLarva
+          -- For debugging purposes: log the time
+        -- , (\n ss -> pack (show n) : ss) <$> eTime
+        ])
   bLog :: Behavior [Text] <-
     stepper [] eLog
 
-  let bRender :: Behavior (Render ())
-      bRender =
-        (\ss -> do
-          (wr, wc) <- ask
-          for (zip [0..] (take wr ss)) $ \(i, s) -> do
-            move (wr - i - 1) 0
-            draw s
-          pure ())
-        <$> bLog
+  pure (render <$> bTime <*> bLog)
 
-  pure bRender
+-- The main rendering function.
+render :: Int -> [Text] -> Render ()
+render time ss = do
+  (wr, wc) <- ask
 
-type Render a
-  = ReaderT (Int, Int) Curses.Update a
+  Render.draw 0 0 (renderTime time)
 
-render :: Render () -> Curses.Window -> Curses.Curses ()
-render action window =
-  Curses.updateWindow window $ do
-    (wr, wc) <- Curses.windowSize
-    runReaderT action (fromIntegral wr, fromIntegral wc)
+  for_ (zip [0..] (take (wr-1) ss)) $ \(i, s) ->
+    Render.draw (wr - i - 1) 0 (Text.justifyLeft (wc-1) ' ' s)
 
-draw :: Text -> Render ()
-draw =
-  lift . Curses.drawText
+--------------------------------------------------------------------------------
+-- Miscellaneous functions
+--------------------------------------------------------------------------------
 
-move :: Int -> Int -> Render ()
-move r c =
-  lift (Curses.moveCursor (fromIntegral r) (fromIntegral c))
+renderTime :: Int -> Text
+renderTime time =
+  "Day " <> pack (show day) <> ", " <>
+    if hour < 13
+      then pack (show hour) <> ":00 am "
+      else pack (show (hour - 12)) <> ":00 pm "
+ where
+  (day, hour) = timeDay time
+
+timeDay :: Int -> (Int, Int)
+timeDay time =
+  (day + 1, hour)
+ where
+  (day, delta) = time `divMod` 100
+  hour = delta * 24 `div` 100
 
 unCurses :: Curses.Curses a -> IO a
 unCurses =
   unsafeCoerce
+
+--------------------------------------------------------------------------------
+-- reactive-banana extras
+--------------------------------------------------------------------------------
+
+leftmost :: [Event a] -> Event a
+leftmost =
+  foldr (unionWith const) never

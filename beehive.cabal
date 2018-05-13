@@ -6,10 +6,14 @@ version: 0
 executable beehive
   main-is: Main.hs
   ghc-options: -Wall
+  other-modules:
+    Distribution
+    Render
   build-depends:
       mitchell-stdlib
     , ncurses
   default-extensions:
+    DeriveFunctor
     LambdaCase
     NamedFieldPuns
     OverloadedStrings

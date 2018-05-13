@@ -4,6 +4,8 @@ with-compiler: ghc-8.4.2
 
 package mitchell-stdlib
   flags:
+    +containers
+    +mwc-random
     +reactive-banana
     +text
     +transformers
