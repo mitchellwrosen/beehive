@@ -1,5 +1,6 @@
 import Distribution (Distribution)
-import Render (Render)
+import Input
+import Render (Display(Inverted, Raw), Render)
 
 import qualified Distribution
 import qualified Render
@@ -27,26 +28,17 @@ main = do
     window :: Curses.Window <-
       Curses.defaultWindow
 
-    (tickAddHandler, fireTick) :: (AddHandler (), Handler ()) <-
-      liftIO newAddHandler
-
-    _ <- liftIO . forkIO . forever $ do
-      fireTick ()
-      threadDelay 100000
-
     network :: EventNetwork <- do
       liftIO . compile $ do
-        eTime :: Event Int <- do
-          eTick :: Event () <-
-            fromAddHandler tickAddHandler
-          accumE 0 ((+1) <$ eTick)
-
         gen :: Random.GenIO <-
           liftIO Random.createSystemRandom
 
+        eInput :: Event Input <-
+          makeInput window
+
         -- The time-varying scene to render.
         bScene :: Behavior (Render ()) <-
-          moment gen eTime
+          moment gen eInput
 
         let doRender :: Render () -> IO ()
             doRender action =
@@ -83,9 +75,19 @@ data Stage
 
 moment
   :: Random.GenIO
-  -> Event Int -- Time
+  -> Event Input
   -> MomentIO (Behavior (Render ()))
-moment gen eTime = mdo
+moment gen eInput = mdo
+  let eTime :: Event Int
+      eTime =
+        filterJust
+          ((\case
+            Time n ->
+              Just n
+            _ ->
+              Nothing)
+          <$> eInput)
+
   bTime :: Behavior Int <-
     stepper 0 eTime
 
@@ -100,6 +102,21 @@ moment gen eTime = mdo
       (leftmost
         [ pure StageLarva <$ eBecomeLarva
         ])
+
+  -- The available actions.
+  let bActions :: Behavior [Text]
+      bActions =
+        (\case
+          StageEgg ->
+            []
+          StageLarva ->
+            ["writhe"])
+        <$> bStage
+
+  -- The selected action. When there are no available actions, the value is
+  -- irrelevant (but should be 0).
+  bSelectedAction :: Behavior Int <-
+    accumB 0 ((+1) <$ filterE (== Key KeyTab) eInput)
 
   -- The distribution of ambient text that might be logged at every tick.
   let bAmbience :: Behavior (Distribution Text)
@@ -135,17 +152,20 @@ moment gen eTime = mdo
   bLog :: Behavior [Text] <-
     stepper [] eLog
 
-  pure (render <$> bTime <*> bLog)
+  pure (render <$> bTime <*> bLog <*> bActions <*> bSelectedAction)
 
 -- The main rendering function.
-render :: Int -> [Text] -> Render ()
-render time ss = do
+render :: Int -> [Text] -> [Text] -> Int -> Render ()
+render time ss actions selectedAction = do
   (wr, wc) <- ask
 
-  Render.draw 0 0 (renderTime time)
+  Render.draw 0 0 (Raw (renderTime time))
 
-  for_ (zip [0..] (take (wr-1) ss)) $ \(i, s) ->
-    Render.draw (wr - i - 1) 0 (Text.justifyLeft (wc-1) ' ' s)
+  for_ (zip [0..] (take (wr-2) ss)) $ \(i, s) ->
+    Render.draw (wr - i - 2) 0 (Raw (Text.justifyLeft (wc-1) ' ' s))
+
+  -- unless (null actions) $
+  --   Render.draw (wr - 1) 0 (Text.unwords actions)
 
 --------------------------------------------------------------------------------
 -- Miscellaneous functions

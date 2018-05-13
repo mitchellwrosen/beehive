@@ -5,9 +5,10 @@ version: 0
 
 executable beehive
   main-is: Main.hs
-  ghc-options: -Wall
+  ghc-options: -Wall -threaded
   other-modules:
     Distribution
+    Input
     Render
   build-depends:
       mitchell-stdlib
