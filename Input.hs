@@ -12,12 +12,11 @@ import qualified UI.NCurses as Curses
 data Input
   = Time Int
   | Key Key
-  deriving Eq
+  deriving (Eq, Show)
 
 data Key
   = KeyChar Char
-  | KeyTab
-  deriving Eq
+  deriving (Eq, Show)
 
 makeInput :: Curses.Window -> MomentIO (Event Input)
 makeInput window = do
@@ -33,13 +32,7 @@ makeInput window = do
           ((\case
             Curses.EventCharacter c ->
               Just (KeyChar c)
-            Curses.EventSpecialKey _ ->
-              Nothing
-            Curses.EventMouse _ _ ->
-              Nothing
-            Curses.EventResized ->
-              Nothing
-            Curses.EventUnknown _ ->
+            _ ->
               Nothing)
             <$> eCurses)
 
